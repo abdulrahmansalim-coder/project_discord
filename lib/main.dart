@@ -1,13 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'theme/app_theme.dart';
 import 'screens/chats_screen.dart';
 import 'screens/contacts_screen.dart';
 import 'screens/stories_screen.dart';
 import 'screens/profile_screen.dart';
 
-void main() {
+// ─── Global key buat akses theme dari mana saja di app ───
+final themeNotifier = ValueNotifier<ThemeMode>(ThemeMode.dark);
+
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Load saved theme preference
+  final prefs = await SharedPreferences.getInstance();
+  final isDark = prefs.getBool('isDarkMode') ?? true;
+  themeNotifier.value = isDark ? ThemeMode.dark : ThemeMode.light;
+
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
@@ -21,11 +31,18 @@ class ChatterApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Chatter',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.darkTheme,
-      home: const MainShell(),
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: themeNotifier,
+      builder: (context, themeMode, _) {
+        return MaterialApp(
+          title: 'Chatter',
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.lightTheme,
+          darkTheme: AppTheme.darkTheme,
+          themeMode: themeMode,
+          home: const MainShell(),
+        );
+      },
     );
   }
 }
@@ -78,9 +95,9 @@ class _BottomNav extends StatelessWidget {
     ];
 
     return Container(
-      decoration: const BoxDecoration(
-        color: AppTheme.bgCard,
-        border: Border(top: BorderSide(color: AppTheme.divider, width: 0.5)),
+      decoration: BoxDecoration(
+        color: Theme.of(context).bottomNavigationBarTheme.backgroundColor,
+        border: const Border(top: BorderSide(color: AppTheme.divider, width: 0.5)),
       ),
       child: SafeArea(
         child: SizedBox(
