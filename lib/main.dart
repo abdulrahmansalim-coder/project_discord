@@ -1,23 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
+import 'providers/auth_provider.dart';
+import 'providers/conversations_provider.dart';
 import 'theme/app_theme.dart';
+import 'screens/auth/login_screen.dart';
 import 'screens/chats_screen.dart';
 import 'screens/contacts_screen.dart';
 import 'screens/stories_screen.dart';
 import 'screens/profile_screen.dart';
 
-// ─── Global key buat akses theme dari mana saja di app ───
-final themeNotifier = ValueNotifier<ThemeMode>(ThemeMode.dark);
-
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Load saved theme preference
-  final prefs = await SharedPreferences.getInstance();
-  final isDark = prefs.getBool('isDarkMode') ?? true;
-  themeNotifier.value = isDark ? ThemeMode.dark : ThemeMode.light;
-
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
@@ -31,25 +25,58 @@ class ChatterApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<ThemeMode>(
-      valueListenable: themeNotifier,
-      builder: (context, themeMode, _) {
-        return MaterialApp(
-          title: 'Chatter',
-          debugShowCheckedModeBanner: false,
-          theme: AppTheme.lightTheme,
-          darkTheme: AppTheme.darkTheme,
-          themeMode: themeMode,
-          home: const MainShell(),
-        );
-      },
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => ConversationsProvider()),
+      ],
+      child: MaterialApp(
+        title: 'Chatter',
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.darkTheme,
+        home: const _AppGate(),
+      ),
     );
+  }
+}
+
+// Decides whether to show login or main shell based on auth state
+class _AppGate extends StatefulWidget {
+  const _AppGate();
+  @override
+  State<_AppGate> createState() => _AppGateState();
+}
+
+class _AppGateState extends State<_AppGate> {
+  @override
+  void initState() {
+    super.initState();
+    // Load tokens & check session on startup
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<AuthProvider>().init();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthProvider>();
+
+    switch (auth.state) {
+      case AuthState.unknown:
+        return const Scaffold(
+          backgroundColor: AppTheme.bgDark,
+          body: Center(child: CircularProgressIndicator(color: AppTheme.primary)),
+        );
+      case AuthState.unauthenticated:
+        return const LoginScreen();
+      case AuthState.authenticated:
+        return const MainShell();
+    }
   }
 }
 
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
-
   @override
   State<MainShell> createState() => _MainShellState();
 }
@@ -67,10 +94,7 @@ class _MainShellState extends State<MainShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _pages,
-      ),
+      body: IndexedStack(index: _currentIndex, children: _pages),
       bottomNavigationBar: _BottomNav(
         currentIndex: _currentIndex,
         onTap: (i) => setState(() => _currentIndex = i),
@@ -82,7 +106,6 @@ class _MainShellState extends State<MainShell> {
 class _BottomNav extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
-
   const _BottomNav({required this.currentIndex, required this.onTap});
 
   @override
@@ -95,10 +118,9 @@ class _BottomNav extends StatelessWidget {
     ];
 
     return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).bottomNavigationBarTheme.backgroundColor,
-        border: const Border(top: BorderSide(color: AppTheme.divider, width: 0.5)),
-      ),
+      decoration: const BoxDecoration(
+        color: AppTheme.bgCard,
+        border: Border(top: BorderSide(color: AppTheme.divider, width: 0.5))),
       child: SafeArea(
         child: SizedBox(
           height: 60,
@@ -106,37 +128,22 @@ class _BottomNav extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: items.asMap().entries.map((e) {
               final i = e.key;
-              final (outlinedIcon, filledIcon, label) = e.value;
+              final (outIcon, fillIcon, label) = e.value;
               final selected = i == currentIndex;
               return GestureDetector(
                 onTap: () => onTap(i),
                 behavior: HitTestBehavior.opaque,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
+                child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 200),
-                        child: Icon(
-                          selected ? filledIcon : outlinedIcon,
-                          key: ValueKey(selected),
-                          color: selected ? AppTheme.primary : AppTheme.textMuted,
-                          size: 24,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        label,
-                        style: TextStyle(
-                          color: selected ? AppTheme.primary : AppTheme.textMuted,
-                          fontSize: 11,
-                          fontWeight: selected ? FontWeight.w700 : FontWeight.normal,
-                        ),
-                      ),
-                    ],
-                  ),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(selected ? fillIcon : outIcon,
+                      color: selected ? AppTheme.primary : AppTheme.textMuted, size: 24),
+                    const SizedBox(height: 2),
+                    Text(label, style: TextStyle(
+                      color: selected ? AppTheme.primary : AppTheme.textMuted,
+                      fontSize: 11,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.normal)),
+                  ]),
                 ),
               );
             }).toList(),
