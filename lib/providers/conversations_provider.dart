@@ -15,7 +15,9 @@ class ConversationsProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
     try {
-      _conversations = await ApiService.getConversations();
+      _conversations = (await ApiService.getConversations())
+        .map((c) => Map<String, dynamic>.from(c as Map))
+        .toList();
     } on ApiException catch (e) {
       _error = e.message;
     } finally {
@@ -30,7 +32,7 @@ class ConversationsProvider extends ChangeNotifier {
       // Add to local list if not present
       final exists = _conversations.any((c) => c['id'].toString() == convo['id'].toString());
       if (!exists) {
-        _conversations.insert(0, convo);
+        _conversations.insert(0, Map<String, dynamic>.from(convo));
         notifyListeners();
       }
       return convo;

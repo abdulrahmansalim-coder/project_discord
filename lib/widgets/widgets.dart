@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
-// ── Enums ─────────────────────────────────────────────────────────────────────
-
 enum UserStatus { online, away, offline }
 
 // ── Avatar with status dot ────────────────────────────────────────────────────
@@ -13,13 +11,7 @@ class UserAvatar extends StatelessWidget {
   final double size;
   final bool showStatus;
 
-  const UserAvatar({
-    super.key,
-    required this.avatarUrl,
-    this.status,
-    this.size = 48,
-    this.showStatus = true,
-  });
+  const UserAvatar({super.key, required this.avatarUrl, this.status, this.size = 48, this.showStatus = true});
 
   Color _statusColor(UserStatus s) {
     switch (s) {
@@ -31,32 +23,19 @@ class UserAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        CircleAvatar(
-          radius: size / 2,
-          backgroundColor: AppTheme.bgInput,
-          backgroundImage: avatarUrl.isNotEmpty ? NetworkImage(avatarUrl) : null,
-          child: avatarUrl.isEmpty
-              ? Icon(Icons.person, color: AppTheme.textMuted, size: size * 0.5)
-              : null,
-        ),
-        if (showStatus && status != null)
-          Positioned(
-            bottom: 1,
-            right: 1,
-            child: Container(
-              width: size * 0.28,
-              height: size * 0.28,
-              decoration: BoxDecoration(
-                color: _statusColor(status!),
-                shape: BoxShape.circle,
-                border: Border.all(color: AppTheme.bgDark, width: 2),
-              ),
-            ),
-          ),
-      ],
-    );
+    final isDark  = Theme.of(context).brightness == Brightness.dark;
+    final inputBg = isDark ? AppTheme.bgInput : AppTheme.bgInputLight;
+    final iconClr = isDark ? AppTheme.textMuted : AppTheme.textMutedLight;
+    return Stack(children: [
+      CircleAvatar(radius: size / 2, backgroundColor: inputBg,
+        backgroundImage: avatarUrl.isNotEmpty ? NetworkImage(avatarUrl) : null,
+        child: avatarUrl.isEmpty ? Icon(Icons.person, color: iconClr, size: size * 0.5) : null),
+      if (showStatus && status != null)
+        Positioned(bottom: 1, right: 1,
+          child: Container(width: size * 0.28, height: size * 0.28,
+            decoration: BoxDecoration(color: _statusColor(status!), shape: BoxShape.circle,
+              border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2)))),
+    ]);
   }
 }
 
@@ -65,27 +44,26 @@ class UserAvatar extends StatelessWidget {
 class ChatSearchBar extends StatelessWidget {
   final ValueChanged<String> onChanged;
   final String hintText;
-
   const ChatSearchBar({super.key, required this.onChanged, this.hintText = 'Search...'});
 
   @override
   Widget build(BuildContext context) {
+    final isDark  = Theme.of(context).brightness == Brightness.dark;
+    final inputBg = isDark ? AppTheme.bgInput : AppTheme.bgInputLight;
+    final hintClr = isDark ? AppTheme.textMuted : AppTheme.textMutedLight;
+    final textClr = isDark ? AppTheme.textPrimary : AppTheme.textPrimaryLight;
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: AppTheme.bgInput,
-        borderRadius: BorderRadius.circular(16),
-      ),
+      decoration: BoxDecoration(color: inputBg, borderRadius: BorderRadius.circular(16)),
       child: TextField(
         onChanged: onChanged,
-        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 15),
+        style: TextStyle(color: textClr, fontSize: 15),
         decoration: InputDecoration(
-          hintText: hintText,
-          hintStyle: const TextStyle(color: AppTheme.textMuted),
-          prefixIcon: const Icon(Icons.search, color: AppTheme.textMuted, size: 20),
+          hintText: hintText, hintStyle: TextStyle(color: hintClr),
+          prefixIcon: Icon(Icons.search, color: hintClr, size: 20),
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 14),
-        ),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 14)),
       ),
     );
   }
@@ -95,72 +73,49 @@ class ChatSearchBar extends StatelessWidget {
 
 class TypingIndicator extends StatefulWidget {
   const TypingIndicator({super.key});
-
   @override
   State<TypingIndicator> createState() => _TypingIndicatorState();
 }
 
-class _TypingIndicatorState extends State<TypingIndicator>
-    with TickerProviderStateMixin {
+class _TypingIndicatorState extends State<TypingIndicator> with TickerProviderStateMixin {
   late List<AnimationController> _controllers;
 
   @override
   void initState() {
     super.initState();
     _controllers = List.generate(3, (i) {
-      final c = AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 600),
-      );
+      final c = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
       Future.delayed(Duration(milliseconds: i * 150), c.repeat);
       return c;
     });
   }
 
   @override
-  void dispose() {
-    for (final c in _controllers) { c.dispose(); }
-    super.dispose();
-  }
+  void dispose() { for (final c in _controllers) { c.dispose(); } super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
+    final isDark    = Theme.of(context).brightness == Brightness.dark;
+    final bubbleBg  = isDark ? AppTheme.bgBubbleOther : AppTheme.bgBubbleOtherLight;
+    final dotColor  = isDark ? AppTheme.textMuted : AppTheme.textMutedLight;
+
     return Padding(
       padding: const EdgeInsets.only(left: 12, bottom: 8),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: const BoxDecoration(
-              color: AppTheme.bgBubbleOther,
-              borderRadius: BorderRadius.only(
-                topLeft:     Radius.circular(20),
-                topRight:    Radius.circular(20),
-                bottomRight: Radius.circular(20),
-                bottomLeft:  Radius.circular(4),
-              ),
-            ),
-            child: Row(
-              children: List.generate(3, (i) {
-                return AnimatedBuilder(
-                  animation: _controllers[i],
-                  builder: (_, __) {
-                    return Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 2),
-                      width: 7,
-                      height: 7 + (_controllers[i].value * 5),
-                      decoration: const BoxDecoration(
-                        color: AppTheme.textMuted,
-                        shape: BoxShape.circle,
-                      ),
-                    );
-                  },
-                );
-              }),
-            ),
-          ),
-        ],
-      ),
+      child: Row(children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(color: bubbleBg,
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(20), topRight: Radius.circular(20),
+              bottomRight: Radius.circular(20), bottomLeft: Radius.circular(4))),
+          child: Row(children: List.generate(3, (i) => AnimatedBuilder(
+            animation: _controllers[i],
+            builder: (_, __) => Container(
+              margin: const EdgeInsets.symmetric(horizontal: 2),
+              width: 7, height: 7 + (_controllers[i].value * 5),
+              decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle))))),
+        ),
+      ]),
     );
   }
 }
@@ -183,21 +138,18 @@ class DateSeparator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark  = Theme.of(context).brightness == Brightness.dark;
+    final textMut = isDark ? AppTheme.textMuted : AppTheme.textMutedLight;
+    final divClr  = isDark ? AppTheme.divider   : AppTheme.dividerLight;
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 16),
-      child: Row(
-        children: [
-          const Expanded(child: Divider(color: AppTheme.divider, indent: 16)),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Text(
-              _label(date),
-              style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
-            ),
-          ),
-          const Expanded(child: Divider(color: AppTheme.divider, endIndent: 16)),
-        ],
-      ),
+      child: Row(children: [
+        Expanded(child: Divider(color: divClr, indent: 16)),
+        Padding(padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Text(_label(date), style: TextStyle(color: textMut, fontSize: 12))),
+        Expanded(child: Divider(color: divClr, endIndent: 16)),
+      ]),
     );
   }
 }

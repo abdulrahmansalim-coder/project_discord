@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../providers/auth_provider.dart';
 import '../providers/conversations_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/widgets.dart';
@@ -11,8 +12,10 @@ class ChatsScreen extends StatefulWidget {
   State<ChatsScreen> createState() => _ChatsScreenState();
 }
 
-class _ChatsScreenState extends State<ChatsScreen> with SingleTickerProviderStateMixin {
+class _ChatsScreenState extends State<ChatsScreen>
+    with SingleTickerProviderStateMixin {
   String _search = '';
+  String _myId   = '';
   late TabController _tabController;
 
   @override
@@ -20,6 +23,7 @@ class _ChatsScreenState extends State<ChatsScreen> with SingleTickerProviderStat
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _myId = context.read<AuthProvider>().user?['id'].toString() ?? '';
       context.read<ConversationsProvider>().load();
     });
   }
@@ -27,30 +31,65 @@ class _ChatsScreenState extends State<ChatsScreen> with SingleTickerProviderStat
   @override
   void dispose() { _tabController.dispose(); super.dispose(); }
 
+  Map<String, dynamic>? _other(Map<String, dynamic> c) {
+    if (c['type'] == 'group') return null;
+    final parts = (c['participants'] as List?) ?? [];
+    final others = parts.where((p) => (p as Map)['id'].toString() != _myId).toList();
+    return others.isNotEmpty ? Map<String, dynamic>.from(others.first as Map) : null;
+  }
+
+  String _displayName(Map<String, dynamic> c) {
+    if (c['type'] == 'group') return c['name'] ?? 'Group Chat';
+    return _other(c)?['name'] ?? 'Unknown';
+  }
+
+  String _displayAvatar(Map<String, dynamic> c) {
+    if (c['type'] == 'group') return c['avatar_url'] ?? '';
+    return _other(c)?['avatar_url'] ?? '';
+  }
+
+  String _displayStatus(Map<String, dynamic> c) {
+    if (c['type'] == 'group') return 'offline';
+    return _other(c)?['status'] ?? 'offline';
+  }
+
   List<dynamic> _filtered(List<dynamic> all) {
     if (_search.isEmpty) return all;
     final q = _search.toLowerCase();
     return all.where((c) {
-      final name = _displayName(c).toLowerCase();
-      final last = (c['last_message']?['content'] ?? '').toLowerCase();
-      return name.contains(q) || last.contains(q);
+      final chat = Map<String, dynamic>.from(c as Map);
+      return _displayName(chat).toLowerCase().contains(q) ||
+          (chat['last_message']?['content'] ?? '').toLowerCase().contains(q);
     }).toList();
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme  = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final bg     = theme.scaffoldBackgroundColor;
+    final cardBg = theme.cardColor;
+
+    final authUser = context.watch<AuthProvider>().user;
+    if (authUser != null && _myId.isEmpty) {
+      _myId = authUser['id'].toString();
+    }
+
     final provider = context.watch<ConversationsProvider>();
     final all    = _filtered(provider.conversations);
-    final groups = all.where((c) => c['type'] == 'group').toList();
-    final unread = all.where((c) => (c['unread_count'] ?? 0) > 0).toList();
+    final groups = all.where((c) => (c as Map)['type'] == 'group').toList();
+    final unread = all.where((c) => int.parse(((c as Map)['unread_count'] ?? 0).toString()) > 0).toList();
 
     return Scaffold(
-      backgroundColor: AppTheme.bgDark,
+      backgroundColor: bg,
       appBar: AppBar(
-        backgroundColor: AppTheme.bgDark,
-        title: const Text('Messages'),
+        backgroundColor: bg,
+        title: Text('Messages', style: TextStyle(color: theme.colorScheme.onBackground)),
         actions: [
-          IconButton(icon: const Icon(Icons.edit_square), onPressed: () {}),
+          IconButton(
+            icon: Icon(Icons.edit_square, color: theme.colorScheme.onBackground),
+            onPressed: () {},
+          ),
           const SizedBox(width: 4),
         ],
         bottom: PreferredSize(
@@ -58,10 +97,10 @@ class _ChatsScreenState extends State<ChatsScreen> with SingleTickerProviderStat
           child: TabBar(
             controller: _tabController,
             labelColor: AppTheme.primary,
-            unselectedLabelColor: AppTheme.textMuted,
+            unselectedLabelColor: isDark ? AppTheme.textMuted : AppTheme.textMutedLight,
             indicatorColor: AppTheme.primary,
             indicatorSize: TabBarIndicatorSize.label,
-            tabs: [Tab(text: 'All'), Tab(text: 'Groups'), Tab(text: 'Unread')],
+            tabs: const [Tab(text: 'All'), Tab(text: 'Groups'), Tab(text: 'Unread')],
           ),
         ),
       ),
@@ -74,7 +113,7 @@ class _ChatsScreenState extends State<ChatsScreen> with SingleTickerProviderStat
               ? _errorView(provider.error!, provider.load)
               : TabBarView(
                   controller: _tabController,
-                  children: [_list(all), _list(groups), _list(unread)],
+                  children: [_list(all, isDark), _list(groups, isDark), _list(unread, isDark)],
                 ),
         ),
       ]),
@@ -86,54 +125,68 @@ class _ChatsScreenState extends State<ChatsScreen> with SingleTickerProviderStat
     );
   }
 
-  Widget _list(List<dynamic> chats) {
+  Widget _list(List<dynamic> chats, bool isDark) {
     if (chats.isEmpty) {
       return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.chat_bubble_outline, size: 64, color: AppTheme.textMuted.withOpacity(0.4)),
+        Icon(Icons.chat_bubble_outline, size: 64,
+          color: (isDark ? AppTheme.textMuted : AppTheme.textMutedLight).withOpacity(0.4)),
         const SizedBox(height: 16),
-        const Text('No conversations yet', style: TextStyle(color: AppTheme.textMuted, fontSize: 16)),
+        Text('No conversations yet',
+          style: TextStyle(color: isDark ? AppTheme.textMuted : AppTheme.textMutedLight, fontSize: 16)),
       ]));
     }
     return RefreshIndicator(
-      color: AppTheme.primary, backgroundColor: AppTheme.bgCard,
+      color: AppTheme.primary,
+      backgroundColor: Theme.of(context).cardColor,
       onRefresh: () => context.read<ConversationsProvider>().load(),
       child: ListView.builder(
         physics: const BouncingScrollPhysics(),
         itemCount: chats.length,
-        itemBuilder: (_, i) => _tile(chats[i] as Map<String, dynamic>),
+        itemBuilder: (_, i) => _tile(Map<String, dynamic>.from(chats[i] as Map), isDark),
       ),
     );
   }
 
-  Widget _tile(Map<String, dynamic> chat) {
-    final last   = chat['last_message'] as Map<String, dynamic>?;
-    final unread = int.parse((chat['unread_count'] ?? 0).toString());
+  Widget _tile(Map<String, dynamic> chat, bool isDark) {
+    final textPri = isDark ? AppTheme.textPrimary   : AppTheme.textPrimaryLight;
+    final textMut = isDark ? AppTheme.textMuted      : AppTheme.textMutedLight;
+    final textSec = isDark ? AppTheme.textSecondary  : AppTheme.textSecondaryLight;
+
+    final last    = chat['last_message'] != null
+        ? Map<String, dynamic>.from(chat['last_message'] as Map) : null;
+    final unread  = int.parse((chat['unread_count'] ?? 0).toString());
     final isGroup = chat['type'] == 'group';
-    final name   = _displayName(chat);
-    final avatar = _displayAvatar(chat);
-    final status = _displayStatus(chat);
+    final name    = _displayName(chat);
+    final avatar  = _displayAvatar(chat);
+    final status  = _displayStatus(chat);
     final lastTime = last != null ? DateTime.tryParse(last['created_at'] ?? '') : null;
-    final isToday = lastTime != null && lastTime.day == DateTime.now().day;
+    final isToday  = lastTime != null && lastTime.day == DateTime.now().day;
 
     return InkWell(
-      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ChatScreen(conversation: chat))),
+      onTap: () => Navigator.push(context,
+        MaterialPageRoute(builder: (_) => ChatScreen(conversation: chat))),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(children: [
-          isGroup ? _groupAvatar(chat['participants'] as List? ?? []) : _avatar(avatar, status),
+          isGroup ? _groupAvatar(chat['participants'] as List? ?? [])
+                  : _avatar(avatar, status),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
-              Expanded(child: Text(name, style: const TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w700, fontSize: 16), overflow: TextOverflow.ellipsis)),
+              Expanded(child: Text(name,
+                style: TextStyle(color: textPri, fontWeight: FontWeight.w700, fontSize: 16),
+                overflow: TextOverflow.ellipsis)),
               if (lastTime != null) Text(
-                isToday ? '${lastTime.hour.toString().padLeft(2,'0')}:${lastTime.minute.toString().padLeft(2,'0')}' : '${lastTime.day}/${lastTime.month}',
-                style: TextStyle(color: unread > 0 ? AppTheme.primary : AppTheme.textMuted, fontSize: 12),
-              ),
+                isToday
+                  ? '${lastTime.hour.toString().padLeft(2,'0')}:${lastTime.minute.toString().padLeft(2,'0')}'
+                  : '${lastTime.day}/${lastTime.month}',
+                style: TextStyle(color: unread > 0 ? AppTheme.primary : textMut, fontSize: 12)),
             ]),
             const SizedBox(height: 4),
             Row(children: [
               Expanded(child: Text(last?['content'] ?? 'No messages yet',
-                style: TextStyle(color: unread > 0 ? AppTheme.textSecondary : AppTheme.textMuted, fontSize: 14,
+                style: TextStyle(
+                  color: unread > 0 ? textSec : textMut, fontSize: 14,
                   fontWeight: unread > 0 ? FontWeight.w500 : FontWeight.normal),
                 overflow: TextOverflow.ellipsis, maxLines: 1)),
               if (unread > 0) ...[
@@ -141,8 +194,7 @@ class _ChatsScreenState extends State<ChatsScreen> with SingleTickerProviderStat
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(12)),
-                  child: Text('$unread', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
-                ),
+                  child: Text('$unread', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700))),
               ],
             ]),
           ])),
@@ -152,51 +204,44 @@ class _ChatsScreenState extends State<ChatsScreen> with SingleTickerProviderStat
   }
 
   Widget _avatar(String url, String status) {
-    Color statusColor = status == 'online' ? AppTheme.online : status == 'away' ? AppTheme.away : AppTheme.offline;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final inputBg = isDark ? AppTheme.bgInput : AppTheme.bgInputLight;
+    Color statusColor = status == 'online' ? AppTheme.online
+        : status == 'away' ? AppTheme.away : AppTheme.offline;
     return Stack(children: [
-      CircleAvatar(radius: 26, backgroundColor: AppTheme.bgInput,
+      CircleAvatar(radius: 26, backgroundColor: inputBg,
         backgroundImage: url.isNotEmpty ? NetworkImage(url) : null,
-        child: url.isEmpty ? const Icon(Icons.person, color: AppTheme.textMuted) : null),
+        child: url.isEmpty ? Icon(Icons.person, color: isDark ? AppTheme.textMuted : AppTheme.textMutedLight) : null),
       Positioned(bottom: 1, right: 1, child: Container(width: 13, height: 13,
         decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle,
-          border: Border.all(color: AppTheme.bgDark, width: 2)))),
+          border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2)))),
     ]);
   }
 
   Widget _groupAvatar(List parts) {
+    final isDark  = Theme.of(context).brightness == Brightness.dark;
+    final p0 = parts.isNotEmpty ? Map<String, dynamic>.from(parts[0] as Map) : null;
+    final p1 = parts.length > 1 ? Map<String, dynamic>.from(parts[1] as Map) : null;
     return SizedBox(width: 52, height: 52, child: Stack(children: [
-      if (parts.isNotEmpty) Positioned(top: 0, left: 0, child: CircleAvatar(radius: 18,
-        backgroundImage: parts[0]['avatar_url'] != null ? NetworkImage(parts[0]['avatar_url']) : null,
+      if (p0 != null) Positioned(top: 0, left: 0, child: CircleAvatar(radius: 18,
+        backgroundImage: (p0['avatar_url'] ?? '').isNotEmpty ? NetworkImage(p0['avatar_url']) : null,
         backgroundColor: AppTheme.primary)),
-      if (parts.length > 1) Positioned(bottom: 0, right: 0, child: CircleAvatar(radius: 18,
-        backgroundImage: parts[1]['avatar_url'] != null ? NetworkImage(parts[1]['avatar_url']) : null,
+      if (p1 != null) Positioned(bottom: 0, right: 0, child: CircleAvatar(radius: 18,
+        backgroundImage: (p1['avatar_url'] ?? '').isNotEmpty ? NetworkImage(p1['avatar_url']) : null,
         backgroundColor: AppTheme.accent)),
     ]));
   }
 
   Widget _errorView(String error, VoidCallback retry) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textMut = isDark ? AppTheme.textMuted : AppTheme.textMutedLight;
     return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-      const Icon(Icons.wifi_off, size: 52, color: AppTheme.textMuted),
+      Icon(Icons.wifi_off, size: 52, color: textMut),
       const SizedBox(height: 16),
-      Text(error, style: const TextStyle(color: AppTheme.textMuted), textAlign: TextAlign.center),
+      Text(error, style: TextStyle(color: textMut), textAlign: TextAlign.center),
       const SizedBox(height: 16),
-      TextButton(onPressed: retry, child: const Text('Retry', style: TextStyle(color: AppTheme.primary))),
+      TextButton(onPressed: retry,
+        child: const Text('Retry', style: TextStyle(color: AppTheme.primary))),
     ]));
-  }
-
-  String _displayName(Map<String, dynamic> c) {
-    if (c['type'] == 'group') return c['name'] ?? 'Group Chat';
-    final parts = (c['participants'] as List?) ?? [];
-    return parts.isNotEmpty ? (parts.first['name'] ?? 'Unknown') : 'Unknown';
-  }
-
-  String _displayAvatar(Map<String, dynamic> c) {
-    final parts = (c['participants'] as List?) ?? [];
-    return parts.isNotEmpty ? (parts.first['avatar_url'] ?? '') : '';
-  }
-
-  String _displayStatus(Map<String, dynamic> c) {
-    final parts = (c['participants'] as List?) ?? [];
-    return parts.isNotEmpty ? (parts.first['status'] ?? 'offline') : 'offline';
   }
 }

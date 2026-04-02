@@ -9,7 +9,6 @@ import '../widgets/widgets.dart';
 class ChatScreen extends StatefulWidget {
   final Map<String, dynamic> conversation;
   const ChatScreen({super.key, required this.conversation});
-
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
@@ -26,15 +25,42 @@ class _ChatScreenState extends State<ChatScreen> {
   int  _page        = 1;
   bool _hasMore     = true;
 
-  int get _convoId => int.parse(widget.conversation['id'].toString());
-  String get _myId => context.read<AuthProvider>().user?['id'].toString() ?? '';
+  int    get _convoId => int.parse(widget.conversation['id'].toString());
+  String get _myId    => context.read<AuthProvider>().user?['id'].toString() ?? '';
+
+  Map<String, dynamic>? get _otherParticipant {
+    if (widget.conversation['type'] == 'group') return null;
+    final parts = (widget.conversation['participants'] as List?) ?? [];
+    final others = parts.where((p) => (p as Map)['id'].toString() != _myId).toList();
+    return others.isNotEmpty ? Map<String, dynamic>.from(others.first as Map) : null;
+  }
+
+  String get _title {
+    if (widget.conversation['type'] == 'group') return widget.conversation['name'] ?? 'Group';
+    return _otherParticipant?['name'] ?? 'Chat';
+  }
+
+  String get _subtitle {
+    if (widget.conversation['type'] == 'group') {
+      final count = (widget.conversation['participants'] as List?)?.length ?? 0;
+      return '$count members';
+    }
+    final status = _otherParticipant?['status'] ?? 'offline';
+    return status == 'online' ? 'Online' : 'Last seen recently';
+  }
+
+  String get _avatarUrl {
+    if (widget.conversation['type'] == 'group') return widget.conversation['avatar_url'] ?? '';
+    return _otherParticipant?['avatar_url'] ?? '';
+  }
+
+  bool get _isOnline => _otherParticipant?['status'] == 'online';
 
   @override
   void initState() {
     super.initState();
     _loadMessages();
     _inputCtrl.addListener(() => setState(() => _isTyping = _inputCtrl.text.isNotEmpty));
-    // Mark all as read
     ApiService.markAllRead(_convoId).catchError((_) {});
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<ConversationsProvider>().markRead(_convoId);
@@ -58,10 +84,10 @@ class _ChatScreenState extends State<ChatScreen> {
       final pagination = data['pagination'];
       setState(() {
         if (loadMore) {
-          _messages = [...msgs, ..._messages];
+          _messages = [...msgs.map((m) => Map<String, dynamic>.from(m as Map)), ..._messages];
           _page++;
         } else {
-          _messages = msgs;
+          _messages = msgs.map((m) => Map<String, dynamic>.from(m as Map)).toList();
           _page = 1;
         }
         _hasMore = (_page < (pagination['total_pages'] ?? 1));
@@ -78,19 +104,15 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _sendMessage() async {
     final text = _inputCtrl.text.trim();
     if (text.isEmpty || _sending) return;
-
     _inputCtrl.clear();
     setState(() { _sending = true; _isTyping = false; });
 
-    // Optimistic local message
     final optimistic = {
       'id': 'temp_${DateTime.now().millisecondsSinceEpoch}',
       'sender_id': int.tryParse(_myId) ?? 0,
-      'content': text,
-      'type': 'text',
+      'content': text, 'type': 'text',
       'created_at': DateTime.now().toIso8601String(),
-      'is_deleted': false,
-      'read_count': 0,
+      'is_deleted': false, 'read_count': 0,
     };
     setState(() => _messages.add(optimistic));
     _scrollToBottom();
@@ -99,12 +121,9 @@ class _ChatScreenState extends State<ChatScreen> {
       final sent = await ApiService.sendMessage(_convoId, text);
       setState(() {
         final idx = _messages.indexWhere((m) => m['id'] == optimistic['id']);
-        if (idx != -1) _messages[idx] = sent;
+        if (idx != -1) _messages[idx] = Map<String, dynamic>.from(sent);
       });
-      // Update conversation list
-      if (mounted) {
-        context.read<ConversationsProvider>().updateConversationLastMessage(_convoId, sent);
-      }
+      if (mounted) context.read<ConversationsProvider>().updateConversationLastMessage(_convoId, sent);
     } on ApiException catch (e) {
       setState(() => _messages.remove(optimistic));
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(
@@ -123,69 +142,54 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  String get _title {
-    if (widget.conversation['type'] == 'group') return widget.conversation['name'] ?? 'Group';
-    final parts = (widget.conversation['participants'] as List?) ?? [];
-    return parts.isNotEmpty ? parts.first['name'] ?? 'Chat' : 'Chat';
-  }
-
-  String get _subtitle {
-    if (widget.conversation['type'] == 'group') {
-      final count = (widget.conversation['participants'] as List?)?.length ?? 0;
-      return '$count members';
-    }
-    final parts = (widget.conversation['participants'] as List?) ?? [];
-    final status = parts.isNotEmpty ? parts.first['status'] ?? 'offline' : 'offline';
-    return status == 'online' ? 'Online' : 'Last seen recently';
-  }
-
-  String get _avatarUrl {
-    final parts = (widget.conversation['participants'] as List?) ?? [];
-    return parts.isNotEmpty ? (parts.first['avatar_url'] ?? '') : '';
-  }
-
   @override
   Widget build(BuildContext context) {
+    final theme  = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final bg     = theme.scaffoldBackgroundColor;
+    final textPri = isDark ? AppTheme.textPrimary : AppTheme.textPrimaryLight;
+    final textMut = isDark ? AppTheme.textMuted    : AppTheme.textMutedLight;
+    final inputBg = isDark ? AppTheme.bgInput      : AppTheme.bgInputLight;
+    final bubbleOther = isDark ? AppTheme.bgBubbleOther : AppTheme.bgBubbleOtherLight;
+
     return Scaffold(
-      backgroundColor: AppTheme.bgDark,
+      backgroundColor: bg,
       appBar: AppBar(
-        backgroundColor: AppTheme.bgDark,
+        backgroundColor: bg,
         leadingWidth: 36,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios, size: 18),
+          icon: Icon(Icons.arrow_back_ios, size: 18, color: textPri),
           onPressed: () => Navigator.pop(context),
         ),
         title: Row(children: [
-          CircleAvatar(radius: 19, backgroundColor: AppTheme.bgInput,
+          CircleAvatar(radius: 19, backgroundColor: inputBg,
             backgroundImage: _avatarUrl.isNotEmpty ? NetworkImage(_avatarUrl) : null,
-            child: _avatarUrl.isEmpty ? const Icon(Icons.person, size: 18, color: AppTheme.textMuted) : null),
+            child: _avatarUrl.isEmpty ? Icon(Icons.person, size: 18, color: textMut) : null),
           const SizedBox(width: 10),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(_title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
-            Text(_subtitle, style: const TextStyle(fontSize: 12, color: AppTheme.textMuted)),
+            Text(_title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: textPri)),
+            Text(_subtitle, style: TextStyle(fontSize: 12,
+              color: _isOnline ? AppTheme.online : textMut)),
           ])),
         ]),
         actions: [
-          IconButton(icon: const Icon(Icons.call_outlined), onPressed: () {}),
-          IconButton(icon: const Icon(Icons.more_vert), onPressed: () {}),
+          IconButton(icon: Icon(Icons.call_outlined, color: textPri), onPressed: () {}),
+          IconButton(icon: Icon(Icons.more_vert, color: textPri), onPressed: () {}),
         ],
       ),
       body: Column(children: [
-        // Load more banner
         if (_hasMore)
           TextButton(
             onPressed: () => _loadMessages(loadMore: true),
-            child: const Text('Load older messages', style: TextStyle(color: AppTheme.primary, fontSize: 13)),
-          ),
+            child: const Text('Load older messages', style: TextStyle(color: AppTheme.primary, fontSize: 13))),
 
-        // Messages
         Expanded(
           child: _loadingMsgs
             ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
             : _messages.isEmpty
-              ? const Center(child: Text('No messages yet.\nSay hello! 👋',
+              ? Center(child: Text('No messages yet.\nSay hello! 👋',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: AppTheme.textMuted, fontSize: 16)))
+                  style: TextStyle(color: textMut, fontSize: 16)))
               : GestureDetector(
                   onTap: () => _focusNode.unfocus(),
                   child: ListView.builder(
@@ -194,26 +198,22 @@ class _ChatScreenState extends State<ChatScreen> {
                     physics: const BouncingScrollPhysics(),
                     itemCount: _messages.length,
                     itemBuilder: (_, i) {
-                      final msg   = _messages[i] as Map<String, dynamic>;
+                      final msg    = _messages[i] as Map<String, dynamic>;
                       final isMine = msg['sender_id'].toString() == _myId;
-
-                      // Date separator
                       Widget? separator;
                       final t = DateTime.tryParse(msg['created_at'] ?? '');
                       if (t != null && (i == 0 || _dayChanged(_messages[i-1], msg))) {
                         separator = DateSeparator(date: t);
                       }
-
                       return Column(children: [
                         if (separator != null) separator,
-                        _buildBubble(msg, isMine),
+                        _buildBubble(msg, isMine, isDark, bubbleOther, textPri, textMut),
                       ]);
                     },
                   ),
                 ),
         ),
-
-        _buildInputBar(),
+        _buildInputBar(isDark, inputBg, textMut),
       ]),
     );
   }
@@ -225,18 +225,20 @@ class _ChatScreenState extends State<ChatScreen> {
     return a.day != b.day || a.month != b.month;
   }
 
-  Widget _buildBubble(Map<String, dynamic> msg, bool isMine) {
+  Widget _buildBubble(Map<String, dynamic> msg, bool isMine, bool isDark,
+      Color bubbleOther, Color textPri, Color textMut) {
     final isTemp    = msg['id'].toString().startsWith('temp_');
     final isDeleted = msg['is_deleted'] == true;
 
     return Padding(
       padding: EdgeInsets.only(left: isMine ? 64 : 12, right: isMine ? 12 : 64, bottom: 4),
-      child: Column(crossAxisAlignment: isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      child: Column(
+        crossAxisAlignment: isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
-              color: isMine ? AppTheme.bgBubbleSelf : AppTheme.bgBubbleOther,
+              color: isMine ? AppTheme.bgBubbleSelf : bubbleOther,
               borderRadius: BorderRadius.only(
                 topLeft: const Radius.circular(20), topRight: const Radius.circular(20),
                 bottomLeft: Radius.circular(isMine ? 20 : 4),
@@ -246,8 +248,9 @@ class _ChatScreenState extends State<ChatScreen> {
             child: Text(
               isDeleted ? '🚫 Message deleted' : msg['content'] ?? '',
               style: TextStyle(
-                color: isDeleted ? AppTheme.textMuted : (isMine ? Colors.white : AppTheme.textPrimary),
-                fontSize: 15, fontStyle: isDeleted ? FontStyle.italic : FontStyle.normal,
+                color: isDeleted ? textMut : (isMine ? Colors.white : textPri),
+                fontSize: 15,
+                fontStyle: isDeleted ? FontStyle.italic : FontStyle.normal,
               ),
             ),
           ),
@@ -257,12 +260,13 @@ class _ChatScreenState extends State<ChatScreen> {
               mainAxisAlignment: isMine ? MainAxisAlignment.end : MainAxisAlignment.start,
               children: [
                 Text(_formatTime(msg['created_at']),
-                  style: const TextStyle(color: AppTheme.textMuted, fontSize: 11)),
+                  style: TextStyle(color: textMut, fontSize: 11)),
                 if (isMine) ...[
                   const SizedBox(width: 4),
                   Icon(isTemp ? Icons.access_time : Icons.done_all,
                     size: 13,
-                    color: int.parse((msg['read_count'] ?? 0).toString()) > 1 ? AppTheme.accent : AppTheme.textMuted),
+                    color: int.parse((msg['read_count'] ?? 0).toString()) > 1
+                        ? AppTheme.accent : textMut),
                 ],
               ],
             ),
@@ -272,28 +276,28 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  Widget _buildInputBar() {
+  Widget _buildInputBar(bool isDark, Color inputBg, Color textMut) {
     return Container(
-      color: AppTheme.bgDark,
+      color: Theme.of(context).scaffoldBackgroundColor,
       padding: EdgeInsets.only(
         left: 12, right: 12, top: 10,
-        bottom: MediaQuery.of(context).padding.bottom + 10,
-      ),
+        bottom: MediaQuery.of(context).padding.bottom + 10),
       child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-        _CircleBtn(icon: Icons.add, onTap: () {}, color: AppTheme.bgInput, iconColor: AppTheme.textSecondary),
+        _CircleBtn(icon: Icons.add, onTap: () {}, color: inputBg, iconColor: textMut),
         const SizedBox(width: 8),
         Expanded(
           child: Container(
             constraints: const BoxConstraints(maxHeight: 120),
-            decoration: BoxDecoration(color: AppTheme.bgInput, borderRadius: BorderRadius.circular(24)),
+            decoration: BoxDecoration(color: inputBg, borderRadius: BorderRadius.circular(24)),
             child: TextField(
               controller: _inputCtrl, focusNode: _focusNode,
               minLines: 1, maxLines: 5,
-              style: const TextStyle(color: AppTheme.textPrimary, fontSize: 15),
-              decoration: const InputDecoration(
-                hintText: 'Message…', hintStyle: TextStyle(color: AppTheme.textMuted),
+              style: TextStyle(color: isDark ? AppTheme.textPrimary : AppTheme.textPrimaryLight, fontSize: 15),
+              decoration: InputDecoration(
+                hintText: 'Message…',
+                hintStyle: TextStyle(color: textMut),
                 border: InputBorder.none,
-                contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               ),
               onSubmitted: (_) => _sendMessage(),
             ),
@@ -307,7 +311,7 @@ class _ChatScreenState extends State<ChatScreen> {
             ? _CircleBtn(key: const ValueKey('send'), icon: Icons.send_rounded,
                 onTap: _sendMessage, color: AppTheme.primary, iconColor: Colors.white)
             : _CircleBtn(key: const ValueKey('mic'), icon: Icons.mic_outlined,
-                onTap: () {}, color: AppTheme.bgInput, iconColor: AppTheme.textSecondary),
+                onTap: () {}, color: inputBg, iconColor: textMut),
         ),
       ]),
     );
