@@ -164,7 +164,10 @@ class _ChatScreenState extends State<ChatScreen> {
         title: Row(children: [
           CircleAvatar(radius: 19, backgroundColor: inputBg,
             backgroundImage: _avatarUrl.isNotEmpty ? NetworkImage(_avatarUrl) : null,
-            child: _avatarUrl.isEmpty ? Icon(Icons.person, size: 18, color: textMut) : null),
+            child: _avatarUrl.isEmpty
+              ? Icon(widget.conversation['type'] == 'group' ? Icons.group : Icons.person,
+                  size: 18, color: textMut)
+              : null),
           const SizedBox(width: 10),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(_title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: textPri)),
@@ -229,12 +232,20 @@ class _ChatScreenState extends State<ChatScreen> {
       Color bubbleOther, Color textPri, Color textMut) {
     final isTemp    = msg['id'].toString().startsWith('temp_');
     final isDeleted = msg['is_deleted'] == true;
+    final isGroup   = widget.conversation['type'] == 'group';
+    final senderName = msg['sender_name'] ?? '';
 
     return Padding(
       padding: EdgeInsets.only(left: isMine ? 64 : 12, right: isMine ? 12 : 64, bottom: 4),
       child: Column(
         crossAxisAlignment: isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
+          // Show sender name in group chats
+          if (isGroup && !isMine && senderName.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 4, bottom: 3),
+              child: Text(senderName,
+                style: const TextStyle(color: AppTheme.primary, fontSize: 12, fontWeight: FontWeight.w600))),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
