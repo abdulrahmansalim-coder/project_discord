@@ -5,6 +5,7 @@ import '../providers/conversations_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/widgets.dart';
 import 'chat_screen.dart';
+import 'create_group_screen.dart';
 
 class ChatsScreen extends StatefulWidget {
   const ChatsScreen({super.key});
@@ -119,8 +120,8 @@ class _ChatsScreenState extends State<ChatsScreen>
       ]),
       floatingActionButton: FloatingActionButton(
         backgroundColor: AppTheme.primary,
-        child: const Icon(Icons.chat_bubble_outline, color: Colors.white),
-        onPressed: () {},
+        child: const Icon(Icons.edit_outlined, color: Colors.white),
+        onPressed: () => _showNewChatOptions(context),
       ),
     );
   }
@@ -220,15 +221,28 @@ class _ChatsScreenState extends State<ChatsScreen>
 
   Widget _groupAvatar(List parts) {
     final isDark  = Theme.of(context).brightness == Brightness.dark;
-    final p0 = parts.isNotEmpty ? Map<String, dynamic>.from(parts[0] as Map) : null;
-    final p1 = parts.length > 1 ? Map<String, dynamic>.from(parts[1] as Map) : null;
+    final inputBg = isDark ? AppTheme.bgInput : AppTheme.bgInputLight;
+    // Filter out current user from display
+    final others = parts.where((p) => (p as Map)['id'].toString() != _myId).toList();
+    final p0 = others.isNotEmpty ? Map<String, dynamic>.from(others[0] as Map) : null;
+    final p1 = others.length > 1 ? Map<String, dynamic>.from(others[1] as Map) : null;
+    if (p0 == null) {
+      return CircleAvatar(radius: 26, backgroundColor: AppTheme.primary.withOpacity(0.2),
+        child: const Icon(Icons.group, color: AppTheme.primary, size: 26));
+    }
     return SizedBox(width: 52, height: 52, child: Stack(children: [
-      if (p0 != null) Positioned(top: 0, left: 0, child: CircleAvatar(radius: 18,
+      Positioned(top: 0, left: 0, child: CircleAvatar(radius: 18,
         backgroundImage: (p0['avatar_url'] ?? '').isNotEmpty ? NetworkImage(p0['avatar_url']) : null,
-        backgroundColor: AppTheme.primary)),
+        backgroundColor: AppTheme.primary,
+        child: (p0['avatar_url'] ?? '').isEmpty
+          ? Text(p0['name'].toString()[0].toUpperCase(),
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)) : null)),
       if (p1 != null) Positioned(bottom: 0, right: 0, child: CircleAvatar(radius: 18,
         backgroundImage: (p1['avatar_url'] ?? '').isNotEmpty ? NetworkImage(p1['avatar_url']) : null,
-        backgroundColor: AppTheme.accent)),
+        backgroundColor: AppTheme.accent,
+        child: (p1['avatar_url'] ?? '').isEmpty
+          ? Text(p1['name'].toString()[0].toUpperCase(),
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)) : null)),
     ]));
   }
 
@@ -243,5 +257,88 @@ class _ChatsScreenState extends State<ChatsScreen>
       TextButton(onPressed: retry,
         child: const Text('Retry', style: TextStyle(color: AppTheme.primary))),
     ]));
+  }
+
+  void _showNewChatOptions(BuildContext context) {
+    final isDark  = Theme.of(context).brightness == Brightness.dark;
+    final cardBg  = isDark ? AppTheme.bgCard : AppTheme.bgCardLight;
+    final textPri = isDark ? AppTheme.textPrimary : AppTheme.textPrimaryLight;
+    final textMut = isDark ? AppTheme.textMuted   : AppTheme.textMutedLight;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: cardBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(width: 40, height: 4,
+              decoration: BoxDecoration(color: textMut, borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 20),
+            Text('New Conversation', style: TextStyle(
+              color: textPri, fontSize: 18, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 16),
+            _OptionTile(
+              icon: Icons.person_outline,
+              label: 'New Direct Message',
+              subtitle: 'Chat with one person',
+              isDark: isDark,
+              onTap: () {
+                Navigator.pop(context);
+                // Open contacts tab
+                // User can tap a contact to start DM
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('Go to People tab and tap the chat icon next to a contact'),
+                  behavior: SnackBarBehavior.floating));
+              },
+            ),
+            _OptionTile(
+              icon: Icons.group_outlined,
+              label: 'New Group Chat',
+              subtitle: 'Chat with multiple people',
+              isDark: isDark,
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => const CreateGroupScreen()));
+              },
+            ),
+            const SizedBox(height: 8),
+          ]),
+        ),
+      ),
+    );
+  }
+
+}
+
+class _OptionTile extends StatelessWidget {
+  final IconData icon;
+  final String label, subtitle;
+  final bool isDark;
+  final VoidCallback onTap;
+
+  const _OptionTile({
+    required this.icon, required this.label, required this.subtitle,
+    required this.isDark, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final textPri = isDark ? AppTheme.textPrimary : AppTheme.textPrimaryLight;
+    final textMut = isDark ? AppTheme.textMuted   : AppTheme.textMutedLight;
+    final inputBg = isDark ? AppTheme.bgInput     : AppTheme.bgInputLight;
+
+    return ListTile(
+      onTap: onTap,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+      leading: Container(width: 48, height: 48,
+        decoration: BoxDecoration(color: AppTheme.primary.withOpacity(0.12), shape: BoxShape.circle),
+        child: Icon(icon, color: AppTheme.primary, size: 22)),
+      title: Text(label, style: TextStyle(color: textPri, fontWeight: FontWeight.w600, fontSize: 15)),
+      subtitle: Text(subtitle, style: TextStyle(color: textMut, fontSize: 12)),
+      trailing: Icon(Icons.arrow_forward_ios, size: 14, color: textMut),
+    );
   }
 }
