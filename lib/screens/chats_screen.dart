@@ -165,7 +165,8 @@ class _ChatsScreenState extends State<ChatsScreen>
 
     return InkWell(
       onTap: () => Navigator.push(context,
-        MaterialPageRoute(builder: (_) => ChatScreen(conversation: chat))),
+        MaterialPageRoute(builder: (_) => ChatScreen(conversation: chat)))
+        .then((_) => context.read<ConversationsProvider>().load()),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(children: [
