@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
@@ -257,7 +259,39 @@ class ApiService {
     await _request('DELETE', '/messages/$messageId');
   }
 
-  // ── Stories ───────────────────────────────────────────────────────────────────
+  // ── Upload ───────────────────────────────────────────────────────────────────
+
+  static Future<String> uploadImageBytes(Uint8List bytes, String filename) async {
+    final uri = Uri.parse('$baseUrl/upload/image');
+    final ext = filename.split('.').last.toLowerCase();
+    final mimeType = ext == 'png' ? 'image/png'
+        : ext == 'gif' ? 'image/gif'
+        : ext == 'webp' ? 'image/webp'
+        : 'image/jpeg';
+
+    final request = http.MultipartRequest('POST', uri)
+      ..headers.addAll({
+        'Accept': 'application/json',
+        if (_accessToken != null) 'Authorization': 'Bearer $_accessToken',
+      })
+      ..files.add(http.MultipartFile.fromBytes(
+        'image',
+        bytes,
+        filename: filename,
+        contentType: MediaType.parse(mimeType),
+      ));
+
+    final streamed = await request.send().timeout(const Duration(seconds: 30));
+    final response = await http.Response.fromStream(streamed);
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+
+    if (response.statusCode != 201) {
+      throw ApiException(data['message'] ?? 'Upload failed', code: response.statusCode);
+    }
+    return data['data']['url'] as String;
+  }
+
+  // ── Stories ───────────────────────────────────────────────────────────────────────
 
   static Future<List<dynamic>> getStories() async {
     final res = await _request('GET', '/stories');

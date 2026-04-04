@@ -213,7 +213,9 @@ class _ContactsScreenState extends State<ContactsScreen>
 
   Future<void> _openChat(Map<String, dynamic> user) async {
     final convo = await context.read<ConversationsProvider>().getOrCreateDirect(int.parse(user['id'].toString()));
-    if (convo != null && mounted) Navigator.push(context, MaterialPageRoute(builder: (_) => ChatScreen(conversation: convo)));
+    if (convo != null && mounted) Navigator.push(context,
+      MaterialPageRoute(builder: (_) => ChatScreen(conversation: convo)))
+      .then((_) => context.read<ConversationsProvider>().load());
   }
 
   Future<void> _acceptRequest(Map<String, dynamic> user) async {

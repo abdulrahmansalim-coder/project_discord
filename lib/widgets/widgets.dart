@@ -3,6 +3,48 @@ import '../theme/app_theme.dart';
 
 enum UserStatus { online, away, offline }
 
+// ── Safe network image helper ─────────────────────────────────────────────────
+// Wraps Image.network with an error fallback — handles CORS/network failures
+
+class SafeNetworkImage extends StatelessWidget {
+  final String url;
+  final double? width;
+  final double? height;
+  final BoxFit fit;
+  final Widget Function(BuildContext)? placeholder;
+
+  const SafeNetworkImage({
+    super.key,
+    required this.url,
+    this.width,
+    this.height,
+    this.fit = BoxFit.cover,
+    this.placeholder,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (url.isEmpty) return _fallback(context);
+    return Image.network(
+      url,
+      width: width,
+      height: height,
+      fit: fit,
+      errorBuilder: (_, __, ___) => _fallback(context),
+      loadingBuilder: (_, child, progress) =>
+          progress == null ? child : _loading(context),
+    );
+  }
+
+  Widget _fallback(BuildContext context) =>
+      placeholder?.call(context) ?? const SizedBox.shrink();
+
+  Widget _loading(BuildContext context) => SizedBox(
+    width: width, height: height,
+    child: const Center(
+      child: CircularProgressIndicator(strokeWidth: 1.5, color: AppTheme.primary)));
+}
+
 // ── Avatar with status dot ────────────────────────────────────────────────────
 
 class UserAvatar extends StatelessWidget {
@@ -11,7 +53,13 @@ class UserAvatar extends StatelessWidget {
   final double size;
   final bool showStatus;
 
-  const UserAvatar({super.key, required this.avatarUrl, this.status, this.size = 48, this.showStatus = true});
+  const UserAvatar({
+    super.key,
+    required this.avatarUrl,
+    this.status,
+    this.size = 48,
+    this.showStatus = true,
+  });
 
   Color _statusColor(UserStatus s) {
     switch (s) {
@@ -26,15 +74,38 @@ class UserAvatar extends StatelessWidget {
     final isDark  = Theme.of(context).brightness == Brightness.dark;
     final inputBg = isDark ? AppTheme.bgInput : AppTheme.bgInputLight;
     final iconClr = isDark ? AppTheme.textMuted : AppTheme.textMutedLight;
+
     return Stack(children: [
-      CircleAvatar(radius: size / 2, backgroundColor: inputBg,
-        backgroundImage: avatarUrl.isNotEmpty ? NetworkImage(avatarUrl) : null,
-        child: avatarUrl.isEmpty ? Icon(Icons.person, color: iconClr, size: size * 0.5) : null),
+      Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(color: inputBg, shape: BoxShape.circle),
+        child: ClipOval(
+          child: avatarUrl.isNotEmpty
+            ? Image.network(
+                avatarUrl,
+                width: size, height: size,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Icon(
+                  Icons.person, color: iconClr, size: size * 0.5),
+              )
+            : Icon(Icons.person, color: iconClr, size: size * 0.5),
+        ),
+      ),
       if (showStatus && status != null)
-        Positioned(bottom: 1, right: 1,
-          child: Container(width: size * 0.28, height: size * 0.28,
-            decoration: BoxDecoration(color: _statusColor(status!), shape: BoxShape.circle,
-              border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2)))),
+        Positioned(
+          bottom: 1, right: 1,
+          child: Container(
+            width: size * 0.28, height: size * 0.28,
+            decoration: BoxDecoration(
+              color: _statusColor(status!),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: Theme.of(context).scaffoldBackgroundColor,
+                width: 2),
+            ),
+          ),
+        ),
     ]);
   }
 }
@@ -60,7 +131,8 @@ class ChatSearchBar extends StatelessWidget {
         onChanged: onChanged,
         style: TextStyle(color: textClr, fontSize: 15),
         decoration: InputDecoration(
-          hintText: hintText, hintStyle: TextStyle(color: hintClr),
+          hintText: hintText,
+          hintStyle: TextStyle(color: hintClr),
           prefixIcon: Icon(Icons.search, color: hintClr, size: 20),
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 14)),
@@ -91,13 +163,16 @@ class _TypingIndicatorState extends State<TypingIndicator> with TickerProviderSt
   }
 
   @override
-  void dispose() { for (final c in _controllers) { c.dispose(); } super.dispose(); }
+  void dispose() {
+    for (final c in _controllers) { c.dispose(); }
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final isDark    = Theme.of(context).brightness == Brightness.dark;
-    final bubbleBg  = isDark ? AppTheme.bgBubbleOther : AppTheme.bgBubbleOtherLight;
-    final dotColor  = isDark ? AppTheme.textMuted : AppTheme.textMutedLight;
+    final isDark   = Theme.of(context).brightness == Brightness.dark;
+    final bubbleBg = isDark ? AppTheme.bgBubbleOther : AppTheme.bgBubbleOtherLight;
+    final dotColor = isDark ? AppTheme.textMuted : AppTheme.textMutedLight;
 
     return Padding(
       padding: const EdgeInsets.only(left: 12, bottom: 8),
@@ -146,7 +221,8 @@ class DateSeparator extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 16),
       child: Row(children: [
         Expanded(child: Divider(color: divClr, indent: 16)),
-        Padding(padding: const EdgeInsets.symmetric(horizontal: 12),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Text(_label(date), style: TextStyle(color: textMut, fontSize: 12))),
         Expanded(child: Divider(color: divClr, endIndent: 16)),
       ]),

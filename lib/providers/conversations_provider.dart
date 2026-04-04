@@ -59,7 +59,10 @@ class ConversationsProvider extends ChangeNotifier {
   void markRead(int convoId) {
     final idx = _conversations.indexWhere((c) => c['id'].toString() == convoId.toString());
     if (idx != -1) {
-      _conversations[idx] = {..._conversations[idx], 'unread_count': 0};
+      // Immediately zero out badge — .then() reload will sync full state from server
+      final updated = Map<String, dynamic>.from(_conversations[idx] as Map);
+      updated['unread_count'] = 0;
+      _conversations[idx] = updated;
       notifyListeners();
     }
   }

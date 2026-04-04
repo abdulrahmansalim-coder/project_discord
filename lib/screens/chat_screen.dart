@@ -1,4 +1,6 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/conversations_provider.dart';
@@ -14,14 +16,19 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final _inputCtrl  = TextEditingController();
-  final _scrollCtrl = ScrollController();
-  final _focusNode  = FocusNode();
+  final _inputCtrl   = TextEditingController();
+  final _scrollCtrl  = ScrollController();
+  final _focusNode   = FocusNode();
+  final _imagePicker = ImagePicker();
 
-  List<dynamic> _messages = [];
+  List<dynamic> _messages  = [];
+  // Store local image bytes for preview while uploading (web-compatible)
+  final Map<String, Uint8List> _localImageBytes = {};
+
   bool _loadingMsgs = true;
   bool _sending     = false;
   bool _isTyping    = false;
+  bool _uploading   = false;
   int  _page        = 1;
   bool _hasMore     = true;
 
@@ -75,6 +82,8 @@ class _ChatScreenState extends State<ChatScreen> {
     super.dispose();
   }
 
+  // ── Load messages ──────────────────────────────────────────────────────────
+
   Future<void> _loadMessages({bool loadMore = false}) async {
     if (loadMore && !_hasMore) return;
     setState(() => _loadingMsgs = !loadMore);
@@ -96,10 +105,11 @@ class _ChatScreenState extends State<ChatScreen> {
       if (!loadMore) _scrollToBottom();
     } on ApiException catch (e) {
       setState(() => _loadingMsgs = false);
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message), backgroundColor: AppTheme.accentWarm));
+      if (mounted) _showSnack(e.message, AppTheme.accentWarm);
     }
   }
+
+  // ── Send text ──────────────────────────────────────────────────────────────
 
   Future<void> _sendMessage() async {
     final text = _inputCtrl.text.trim();
@@ -107,8 +117,9 @@ class _ChatScreenState extends State<ChatScreen> {
     _inputCtrl.clear();
     setState(() { _sending = true; _isTyping = false; });
 
+    final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
     final optimistic = {
-      'id': 'temp_${DateTime.now().millisecondsSinceEpoch}',
+      'id': tempId,
       'sender_id': int.tryParse(_myId) ?? 0,
       'content': text, 'type': 'text',
       'created_at': DateTime.now().toIso8601String(),
@@ -120,17 +131,123 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final sent = await ApiService.sendMessage(_convoId, text);
       setState(() {
-        final idx = _messages.indexWhere((m) => m['id'] == optimistic['id']);
+        final idx = _messages.indexWhere((m) => m['id'] == tempId);
         if (idx != -1) _messages[idx] = Map<String, dynamic>.from(sent);
       });
-      if (mounted) context.read<ConversationsProvider>().updateConversationLastMessage(_convoId, sent);
+      if (mounted) context.read<ConversationsProvider>()
+          .updateConversationLastMessage(_convoId, sent);
     } on ApiException catch (e) {
-      setState(() => _messages.remove(optimistic));
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message), backgroundColor: AppTheme.accentWarm));
+      setState(() => _messages.removeWhere((m) => m['id'] == tempId));
+      if (mounted) _showSnack(e.message, AppTheme.accentWarm);
     } finally {
       setState(() => _sending = false);
     }
+  }
+
+  // ── Pick & send image (web-compatible using XFile bytes) ──────────────────
+
+  Future<void> _pickImage(ImageSource source) async {
+    Navigator.pop(context);
+    try {
+      final picked = await _imagePicker.pickImage(
+        source: source,
+        imageQuality: 80,
+        maxWidth: 1200,
+      );
+      if (picked == null) return;
+      final bytes = await picked.readAsBytes();
+      await _sendImage(bytes, picked.name);
+    } catch (e) {
+      _showSnack('Could not pick image', AppTheme.accentWarm);
+    }
+  }
+
+  Future<void> _sendImage(Uint8List bytes, String filename) async {
+    setState(() => _uploading = true);
+
+    final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+
+    // Store bytes locally for preview
+    _localImageBytes[tempId] = bytes;
+
+    final optimistic = {
+      'id': tempId,
+      'sender_id': int.tryParse(_myId) ?? 0,
+      'content': '', 'type': 'image',
+      'media_url': null,
+      'created_at': DateTime.now().toIso8601String(),
+      'is_deleted': false, 'read_count': 0,
+    };
+    setState(() => _messages.add(optimistic));
+    _scrollToBottom();
+
+    try {
+      // 1. Upload image bytes to server
+      final imageUrl = await ApiService.uploadImageBytes(bytes, filename);
+
+      // 2. Send message with the returned URL
+      final sent = await ApiService.sendMessage(_convoId, imageUrl, type: 'image');
+
+      setState(() {
+        final idx = _messages.indexWhere((m) => m['id'] == tempId);
+        if (idx != -1) _messages[idx] = Map<String, dynamic>.from(sent);
+        // Clean up local bytes once uploaded
+        _localImageBytes.remove(tempId);
+      });
+
+      if (mounted) context.read<ConversationsProvider>()
+          .updateConversationLastMessage(_convoId, sent);
+    } on ApiException catch (e) {
+      setState(() {
+        _messages.removeWhere((m) => m['id'] == tempId);
+        _localImageBytes.remove(tempId);
+      });
+      _showSnack(e.message, AppTheme.accentWarm);
+    } finally {
+      setState(() => _uploading = false);
+    }
+  }
+
+  void _showImageSourceSheet() {
+    final isDark  = Theme.of(context).brightness == Brightness.dark;
+    final cardBg  = isDark ? AppTheme.bgCard      : AppTheme.bgCardLight;
+    final textPri = isDark ? AppTheme.textPrimary  : AppTheme.textPrimaryLight;
+    final textMut = isDark ? AppTheme.textMuted    : AppTheme.textMutedLight;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: cardBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(width: 40, height: 4,
+              decoration: BoxDecoration(color: textMut, borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 20),
+            Text('Send Image', style: TextStyle(
+              color: textPri, fontSize: 18, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 20),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+              _ImageSourceBtn(
+                icon: Icons.photo_library_outlined,
+                label: 'Gallery',
+                isDark: isDark,
+                onTap: () => _pickImage(ImageSource.gallery),
+              ),
+              _ImageSourceBtn(
+                icon: Icons.camera_alt_outlined,
+                label: 'Camera',
+                isDark: isDark,
+                onTap: () => _pickImage(ImageSource.camera),
+              ),
+            ]),
+            const SizedBox(height: 16),
+          ]),
+        ),
+      ),
+    );
   }
 
   void _scrollToBottom() {
@@ -142,14 +259,24 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  void _showSnack(String msg, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg), backgroundColor: color,
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))));
+  }
+
+  // ── Build ──────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    final theme  = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final bg     = theme.scaffoldBackgroundColor;
-    final textPri = isDark ? AppTheme.textPrimary : AppTheme.textPrimaryLight;
-    final textMut = isDark ? AppTheme.textMuted    : AppTheme.textMutedLight;
-    final inputBg = isDark ? AppTheme.bgInput      : AppTheme.bgInputLight;
+    final theme       = Theme.of(context);
+    final isDark      = theme.brightness == Brightness.dark;
+    final bg          = theme.scaffoldBackgroundColor;
+    final textPri     = isDark ? AppTheme.textPrimary : AppTheme.textPrimaryLight;
+    final textMut     = isDark ? AppTheme.textMuted    : AppTheme.textMutedLight;
+    final inputBg     = isDark ? AppTheme.bgInput      : AppTheme.bgInputLight;
     final bubbleOther = isDark ? AppTheme.bgBubbleOther : AppTheme.bgBubbleOtherLight;
 
     return Scaffold(
@@ -166,8 +293,7 @@ class _ChatScreenState extends State<ChatScreen> {
             backgroundImage: _avatarUrl.isNotEmpty ? NetworkImage(_avatarUrl) : null,
             child: _avatarUrl.isEmpty
               ? Icon(widget.conversation['type'] == 'group' ? Icons.group : Icons.person,
-                  size: 18, color: textMut)
-              : null),
+                  size: 18, color: textMut) : null),
           const SizedBox(width: 10),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(_title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: textPri)),
@@ -184,7 +310,13 @@ class _ChatScreenState extends State<ChatScreen> {
         if (_hasMore)
           TextButton(
             onPressed: () => _loadMessages(loadMore: true),
-            child: const Text('Load older messages', style: TextStyle(color: AppTheme.primary, fontSize: 13))),
+            child: const Text('Load older messages',
+              style: TextStyle(color: AppTheme.primary, fontSize: 13))),
+
+        if (_uploading)
+          LinearProgressIndicator(
+            backgroundColor: inputBg,
+            valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.primary)),
 
         Expanded(
           child: _loadingMsgs
@@ -228,43 +360,52 @@ class _ChatScreenState extends State<ChatScreen> {
     return a.day != b.day || a.month != b.month;
   }
 
+  // ── Bubble ─────────────────────────────────────────────────────────────────
+
   Widget _buildBubble(Map<String, dynamic> msg, bool isMine, bool isDark,
       Color bubbleOther, Color textPri, Color textMut) {
-    final isTemp    = msg['id'].toString().startsWith('temp_');
+    final tempId    = msg['id'].toString();
+    final isTemp    = tempId.startsWith('temp_');
     final isDeleted = msg['is_deleted'] == true;
+    final isImage   = msg['type'] == 'image';
     final isGroup   = widget.conversation['type'] == 'group';
     final senderName = msg['sender_name'] ?? '';
 
     return Padding(
-      padding: EdgeInsets.only(left: isMine ? 64 : 12, right: isMine ? 12 : 64, bottom: 4),
+      padding: EdgeInsets.only(
+        left: isMine ? 64 : 12, right: isMine ? 12 : 64, bottom: 4),
       child: Column(
         crossAxisAlignment: isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
-          // Show sender name in group chats
+          // Sender name in group chats
           if (isGroup && !isMine && senderName.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(left: 4, bottom: 3),
-              child: Text(senderName,
-                style: const TextStyle(color: AppTheme.primary, fontSize: 12, fontWeight: FontWeight.w600))),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: isMine ? AppTheme.bgBubbleSelf : bubbleOther,
-              borderRadius: BorderRadius.only(
-                topLeft: const Radius.circular(20), topRight: const Radius.circular(20),
-                bottomLeft: Radius.circular(isMine ? 20 : 4),
-                bottomRight: Radius.circular(isMine ? 4 : 20),
+              child: Text(senderName, style: const TextStyle(
+                color: AppTheme.primary, fontSize: 12, fontWeight: FontWeight.w600))),
+
+          // Bubble content
+          isImage
+            ? _buildImageBubble(msg, isMine, isTemp, tempId)
+            : Container(
+                constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: isMine ? AppTheme.bgBubbleSelf : bubbleOther,
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(20), topRight: const Radius.circular(20),
+                    bottomLeft: Radius.circular(isMine ? 20 : 4),
+                    bottomRight: Radius.circular(isMine ? 4 : 20)),
+                ),
+                child: Text(
+                  isDeleted ? '🚫 Message deleted' : msg['content'] ?? '',
+                  style: TextStyle(
+                    color: isDeleted ? textMut : (isMine ? Colors.white : textPri),
+                    fontSize: 15,
+                    fontStyle: isDeleted ? FontStyle.italic : FontStyle.normal)),
               ),
-            ),
-            child: Text(
-              isDeleted ? '🚫 Message deleted' : msg['content'] ?? '',
-              style: TextStyle(
-                color: isDeleted ? textMut : (isMine ? Colors.white : textPri),
-                fontSize: 15,
-                fontStyle: isDeleted ? FontStyle.italic : FontStyle.normal,
-              ),
-            ),
-          ),
+
+          // Timestamp
           Padding(
             padding: const EdgeInsets.only(top: 3, left: 4, right: 4),
             child: Row(
@@ -287,6 +428,81 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  Widget _buildImageBubble(Map<String, dynamic> msg, bool isMine, bool isTemp, String tempId) {
+    final localBytes = _localImageBytes[tempId];
+    // Check content first (we store URL there), fallback to media_url
+    final rawContent = msg['content']?.toString() ?? '';
+    final rawMedia   = msg['media_url']?.toString() ?? '';
+    final imageUrl   = rawContent.startsWith('http') ? rawContent
+                     : rawMedia.startsWith('http')   ? rawMedia
+                     : '';
+
+    final radius = BorderRadius.only(
+      topLeft: const Radius.circular(20), topRight: const Radius.circular(20),
+      bottomLeft: Radius.circular(isMine ? 20 : 4),
+      bottomRight: Radius.circular(isMine ? 4 : 20));
+
+    Widget imageWidget;
+
+    if (isTemp && localBytes != null) {
+      // Local preview while uploading
+      imageWidget = Image.memory(localBytes, fit: BoxFit.contain);
+    } else if (imageUrl.isNotEmpty) {
+      // Network image from server
+      imageWidget = Image.network(
+        imageUrl,
+        fit: BoxFit.contain,
+        headers: const {'Access-Control-Allow-Origin': '*'},
+        loadingBuilder: (_, child, progress) => progress == null
+          ? child
+          : Container(width: 220, height: 220,
+              color: AppTheme.bgInput, width: 200, height: 200,
+              child: const Center(child: CircularProgressIndicator(
+                color: AppTheme.primary, strokeWidth: 2))),
+        errorBuilder: (_, error, __) {
+          // If CORS blocks it, show a clickable link as fallback
+          return GestureDetector(
+            onTap: () async {
+              // ignore: deprecated_member_use
+              // Try to open image in new tab on web
+            },
+            child: Container(
+              width: 200, height: 80,
+              decoration: BoxDecoration(
+                color: AppTheme.bgInput,
+                borderRadius: BorderRadius.circular(8)),
+              child: const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.image_outlined, color: AppTheme.primary, size: 32),
+                SizedBox(height: 4),
+                Text('📷 Image', style: TextStyle(color: AppTheme.primary, fontSize: 13, fontWeight: FontWeight.w600)),
+              ]))));
+        },
+      );
+    } else {
+      // Fallback placeholder
+      imageWidget = Container(width: 200, height: 80,
+        color: AppTheme.bgInput,
+        child: const Center(child: Icon(Icons.image_outlined, color: AppTheme.textMuted, size: 40)));
+    }
+
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 280),
+      child: ClipRRect(
+        borderRadius: radius,
+        child: Stack(children: [
+          imageWidget,
+          if (isTemp)
+            Positioned.fill(child: Container(
+              color: Colors.black26,
+              child: const Center(child: CircularProgressIndicator(
+                color: Colors.white, strokeWidth: 2.5)))),
+        ]),
+      ),
+    );
+  }
+
+  // ── Input bar ──────────────────────────────────────────────────────────────
+
   Widget _buildInputBar(bool isDark, Color inputBg, Color textMut) {
     return Container(
       color: Theme.of(context).scaffoldBackgroundColor,
@@ -294,7 +510,11 @@ class _ChatScreenState extends State<ChatScreen> {
         left: 12, right: 12, top: 10,
         bottom: MediaQuery.of(context).padding.bottom + 10),
       child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-        _CircleBtn(icon: Icons.add, onTap: () {}, color: inputBg, iconColor: textMut),
+        _CircleBtn(
+          icon: Icons.attach_file_rounded,
+          onTap: _showImageSourceSheet,
+          color: inputBg,
+          iconColor: AppTheme.primary),
         const SizedBox(width: 8),
         Expanded(
           child: Container(
@@ -303,13 +523,13 @@ class _ChatScreenState extends State<ChatScreen> {
             child: TextField(
               controller: _inputCtrl, focusNode: _focusNode,
               minLines: 1, maxLines: 5,
-              style: TextStyle(color: isDark ? AppTheme.textPrimary : AppTheme.textPrimaryLight, fontSize: 15),
+              style: TextStyle(
+                color: isDark ? AppTheme.textPrimary : AppTheme.textPrimaryLight,
+                fontSize: 15),
               decoration: InputDecoration(
-                hintText: 'Message…',
-                hintStyle: TextStyle(color: textMut),
+                hintText: 'Message…', hintStyle: TextStyle(color: textMut),
                 border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12)),
               onSubmitted: (_) => _sendMessage(),
             ),
           ),
@@ -335,17 +555,46 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 }
 
+// ── Helper widgets ─────────────────────────────────────────────────────────────
+
 class _CircleBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
   final Color color, iconColor;
-  const _CircleBtn({super.key, required this.icon, required this.onTap, required this.color, required this.iconColor});
+  const _CircleBtn({super.key, required this.icon, required this.onTap,
+    required this.color, required this.iconColor});
 
   @override
   Widget build(BuildContext context) => GestureDetector(
     onTap: onTap,
     child: Container(width: 44, height: 44,
       decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-      child: Icon(icon, color: iconColor, size: 22)),
-  );
+      child: Icon(icon, color: iconColor, size: 22)));
+}
+
+class _ImageSourceBtn extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool isDark;
+  final VoidCallback onTap;
+  const _ImageSourceBtn({required this.icon, required this.label,
+    required this.isDark, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final textPri = isDark ? AppTheme.textPrimary : AppTheme.textPrimaryLight;
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(children: [
+        Container(width: 72, height: 72,
+          decoration: BoxDecoration(
+            color: AppTheme.primary.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(20)),
+          child: Icon(icon, color: AppTheme.primary, size: 32)),
+        const SizedBox(height: 8),
+        Text(label, style: TextStyle(
+          color: textPri, fontWeight: FontWeight.w600, fontSize: 14)),
+      ]),
+    );
+  }
 }
