@@ -67,13 +67,18 @@ class MessageController extends BaseController
             return $this->badRequest('Validation failed', $this->validator->getErrors());
         }
 
+        $type    = $body['type'] ?? 'text';
+        $content = $body['content'];
+        // For image messages, store URL in both content and media_url
+        $mediaUrl = $body['media_url'] ?? ($type === 'image' ? $content : null);
+
         $msgId = $this->messages->insert([
             'conversation_id' => $convoId,
             'sender_id'       => $userId,
-            'content'         => $body['content'],
-            'type'            => $body['type'] ?? 'text',
+            'content'         => $content,
+            'type'            => $type,
             'reply_to_id'     => $body['reply_to_id'] ?? null,
-            'media_url'       => $body['media_url'] ?? null,
+            'media_url'       => $mediaUrl,
         ]);
 
         // Touch conversation updated_at so it bubbles to top of list
