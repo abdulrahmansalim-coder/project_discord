@@ -22,7 +22,7 @@ class UploadController extends BaseController
             return $this->badRequest('File too large. Maximum size is 5MB.');
         }
 
-        $uploadPath = WRITEPATH . 'uploads/';
+        $uploadPath = FCPATH . 'uploads/images/';
         if (!is_dir($uploadPath)) {
             mkdir($uploadPath, 0755, true);
         }
@@ -30,30 +30,24 @@ class UploadController extends BaseController
         $newName = $file->getRandomName();
         $file->move($uploadPath, $newName);
 
-        // Return a URL that goes through CI4 (so CORS headers are always applied)
         $baseUrl = rtrim(base_url(), '/');
-        $url     = $baseUrl . '/api/v1/image/' . $newName;
+        $url     = $baseUrl . '/uploads/images/' . $newName;
 
         return $this->created(['url' => $url], 'Image uploaded successfully');
     }
 
-    // GET /api/v1/image/:filename  — serves image WITH CORS headers via CI4
+    // Keep serve() for backwards compatibility with old messages
     public function serve($filename = null)
     {
-        if (!$filename) {
-            return $this->notFound('No filename provided');
-        }
-
-        // Sanitize — no path traversal
-        $filename    = basename($filename);
-        $filePath    = WRITEPATH . 'uploads/' . $filename;
-
+        if (!$filename) return $this->notFound('No filename provided');
+        $filename = basename($filename);
+        $filePath = FCPATH . 'uploads/images/' . $filename;
         if (!file_exists($filePath)) {
-            return $this->notFound('Image not found');
+            // fallback to writable
+            $filePath = WRITEPATH . 'uploads/' . $filename;
+            if (!file_exists($filePath)) return $this->notFound('Image not found');
         }
-
         $mime = mime_content_type($filePath) ?: 'image/jpeg';
-
         return $this->response
             ->setHeader('Content-Type', $mime)
             ->setHeader('Cache-Control', 'public, max-age=86400')

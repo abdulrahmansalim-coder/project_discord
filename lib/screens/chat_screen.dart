@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/painting.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
@@ -452,31 +453,25 @@ class _ChatScreenState extends State<ChatScreen> {
       imageWidget = Image.network(
         imageUrl,
         fit: BoxFit.contain,
-        headers: const {'Access-Control-Allow-Origin': '*'},
+        // Use HTML img element on web — bypasses CORS canvas restrictions
+        webHtmlElementStrategy: WebHtmlElementStrategy.prefer,
         loadingBuilder: (_, child, progress) => progress == null
           ? child
-          : Container(width: 220, height: 220,
-              color: AppTheme.bgInput, width: 200, height: 200,
+          : Container(
+              width: 200, height: 200,
+              color: AppTheme.bgInput,
               child: const Center(child: CircularProgressIndicator(
                 color: AppTheme.primary, strokeWidth: 2))),
-        errorBuilder: (_, error, __) {
-          // If CORS blocks it, show a clickable link as fallback
-          return GestureDetector(
-            onTap: () async {
-              // ignore: deprecated_member_use
-              // Try to open image in new tab on web
-            },
-            child: Container(
-              width: 200, height: 80,
-              decoration: BoxDecoration(
-                color: AppTheme.bgInput,
-                borderRadius: BorderRadius.circular(8)),
-              child: const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.image_outlined, color: AppTheme.primary, size: 32),
-                SizedBox(height: 4),
-                Text('📷 Image', style: TextStyle(color: AppTheme.primary, fontSize: 13, fontWeight: FontWeight.w600)),
-              ]))));
-        },
+        errorBuilder: (_, __, ___) => Container(
+          width: 200, height: 80,
+          decoration: BoxDecoration(
+            color: AppTheme.bgInput,
+            borderRadius: BorderRadius.circular(8)),
+          child: const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.broken_image_outlined, color: AppTheme.textMuted, size: 32),
+            SizedBox(height: 4),
+            Text('Could not load image', style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+          ]))),
       );
     } else {
       // Fallback placeholder
