@@ -298,6 +298,20 @@ class ApiService {
     return res['data'];
   }
 
+  static Future<void> createStory({
+    required String type,
+    String? content,
+    String? mediaUrl,
+    String bgColor = '#6C63FF',
+  }) async {
+    await _request('POST', '/stories', body: {
+      'type': type,
+      if (content != null) 'content': content,
+      if (mediaUrl != null) 'media_url': mediaUrl,
+      'bg_color': bgColor,
+    });
+  }
+
   static Future<void> viewStory(int storyId) async {
     await _request('POST', '/stories/$storyId/view');
   }
